@@ -2,7 +2,19 @@
 #include "d3dx11effect.h"
 #include "MathHelper.h"
 
-struct Vertex
+static const bool singleSlot = true;
+
+struct PositionVertex
+{
+	XMFLOAT3	Position;
+};
+
+struct ColorVertex
+{
+	XMFLOAT4	Color;
+};
+
+struct CombinedVertex
 {
 	XMFLOAT3	Position;
 	XMFLOAT4	Color;
@@ -24,12 +36,28 @@ public:
 	void OnMouseMove(WPARAM buttonState, int x, int y);
 
 private:
+
+	void DrawCube();
+	void DrawPyramid();
+	void UpdateConstantBuffer(XMFLOAT4X4 &worldMatrix);
+	void ApplyTechnique(ID3DX11EffectTechnique* technique, UINT indicesAmount);
+
 	void BuildGeometryBuffers();
 	void BuildFX();
 	void BuildVertexLayout();
 
-	ID3D11Buffer* mBoxVB;
+	ID3D11Buffer* mBoxPositionVB;
+	ID3D11Buffer* mBoxColorVB;
 	ID3D11Buffer* mBoxIB;
+	UINT mIndexAmount;
+
+	ID3D11Buffer* mPyramidVB;
+	ID3D11Buffer* mPyramidIB;
+	UINT mPyramidIndexAmount;
+
+	
+	UINT posSlot;
+	UINT colorSlot;
 
 	ID3DX11Effect* mFX;
 	ID3DX11EffectTechnique* mTech;
@@ -37,7 +65,10 @@ private:
 
 	ID3D11InputLayout* mInputLayout;
 
+	XMFLOAT4X4 mPyramidWorld;
+
 	XMFLOAT4X4 mWorld;
+
 	XMFLOAT4X4 mView;
 	XMFLOAT4X4 mProj;
 
@@ -66,7 +97,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, in
 
 BoxApp::BoxApp(HINSTANCE hInstance)
 	: D3DApp(hInstance)
-	, mBoxVB(nullptr)
+	, mBoxPositionVB(nullptr)
+	, mBoxColorVB(nullptr)
 	, mBoxIB(nullptr)
 	, mFX(nullptr)
 	, mTech(nullptr)
@@ -82,14 +114,30 @@ BoxApp::BoxApp(HINSTANCE hInstance)
 
 	XMMATRIX I = XMMatrixIdentity();
 	XMStoreFloat4x4(&mWorld, I);
+	XMStoreFloat4x4(&mPyramidWorld, I);
 	XMStoreFloat4x4(&mView, I);
 	XMStoreFloat4x4(&mProj, I);
+
+	mIndexAmount = 36;
+	mPyramidIndexAmount = 18;
+	posSlot = 0;
+	if (singleSlot)
+	{
+		colorSlot = 0;
+	}
+	else
+	{
+		colorSlot = 1;
+	}
 }
 
 BoxApp::~BoxApp()
 {
-	ReleaseCOM(mBoxVB);
+	ReleaseCOM(mBoxPositionVB);
+	ReleaseCOM(mBoxColorVB);
 	ReleaseCOM(mBoxIB);
+	ReleaseCOM(mPyramidVB);
+	ReleaseCOM(mPyramidIB);
 	ReleaseCOM(mFX);
 	ReleaseCOM(mInputLayout);
 }
@@ -135,36 +183,85 @@ void BoxApp::UpdateScene(float dt)
 
 void BoxApp::DrawScene()
 {
-	md3dImmediateContext->ClearRenderTargetView(mRenderTargetView, Colors::Blue);
+	md3dImmediateContext->ClearRenderTargetView(mRenderTargetView, Colors::LightSteelBlue);
 	md3dImmediateContext->ClearDepthStencilView(mDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
 	md3dImmediateContext->IASetInputLayout(mInputLayout);
 	md3dImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	UINT stride = sizeof(Vertex);
+	//DrawCube();
+	DrawPyramid();
+
+	HR(mSwapChain->Present(0, 0));
+}
+
+void BoxApp::DrawCube()
+{
+	// Two input slots
+	// 0: position
+	// 1: color
+
 	UINT offset = 0;
-	md3dImmediateContext->IASetVertexBuffers(0, 1, &mBoxVB, &stride, &offset);
+	UINT comboStride = sizeof(CombinedVertex);
+	UINT posStride = sizeof(PositionVertex);
+	UINT colorStride = sizeof(ColorVertex);
+
+	if (singleSlot)
+	{
+		md3dImmediateContext->IASetVertexBuffers(posSlot, 1, &mBoxPositionVB, &comboStride, &offset);
+	}
+	else
+	{
+		md3dImmediateContext->IASetVertexBuffers(posSlot, 1, &mBoxPositionVB, &posStride, &offset);
+		md3dImmediateContext->IASetVertexBuffers(colorSlot, 1, &mBoxColorVB, &colorStride, &offset);
+	}
+
 	md3dImmediateContext->IASetIndexBuffer(mBoxIB, DXGI_FORMAT_R32_UINT, 0);
 
+	UpdateConstantBuffer(mWorld);
+	ApplyTechnique(mTech, mIndexAmount);
+
+}
+
+void BoxApp::DrawPyramid()
+{
+	// Only works in single slot mode
+	if (!singleSlot)
+	{
+		return;
+	}
+
+	UINT offset = 0;
+	UINT comboStride = sizeof(CombinedVertex);
+
+	md3dImmediateContext->IASetVertexBuffers(posSlot, 1, &mPyramidVB, &comboStride, &offset);
+	md3dImmediateContext->IASetIndexBuffer(mPyramidIB, DXGI_FORMAT_R32_UINT, 0);
+
+	UpdateConstantBuffer(mPyramidWorld);
+	ApplyTechnique(mTech, mPyramidIndexAmount);
+}
+
+void BoxApp::UpdateConstantBuffer(XMFLOAT4X4 &worldMatrix)
+{
 	// Constant buffer
-	XMMATRIX world = XMLoadFloat4x4(&mWorld);
+	XMMATRIX world = XMLoadFloat4x4(&worldMatrix);
 	XMMATRIX view = XMLoadFloat4x4(&mView);
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 	XMMATRIX worldViewProj = world * view * proj;
 
 	mfxWorldViewProj->SetMatrix(reinterpret_cast<float*>(&worldViewProj));
+}
 
+void BoxApp::ApplyTechnique(ID3DX11EffectTechnique* technique, UINT indicesAmount)
+{
 	D3DX11_TECHNIQUE_DESC techDesc;
-	mTech->GetDesc(&techDesc);
+	technique->GetDesc(&techDesc);
 	for (UINT pass = 0; pass < techDesc.Passes; pass++)
 	{
 		mTech->GetPassByIndex(pass)->Apply(0, md3dImmediateContext);
 
-		// Box has 36 indices
-		md3dImmediateContext->DrawIndexed(36, 0, 0);
+		md3dImmediateContext->DrawIndexed(indicesAmount, 0, 0);
 	}
-
-	HR(mSwapChain->Present(0, 0));
 }
 
 void BoxApp::OnMouseDown(WPARAM buttonState, int x, int y)
@@ -211,7 +308,37 @@ void BoxApp::OnMouseMove(WPARAM buttonState, int x, int y)
 
 void BoxApp::BuildGeometryBuffers()
 {
-	Vertex vertices[] =
+	//
+	// CUBE
+	//
+
+	const UINT uniqueVertexAmount = 8;
+
+	PositionVertex positionVertices[uniqueVertexAmount] =
+	{
+		{ XMFLOAT3(-1.0f, -1.0f, -1.0f) },
+		{ XMFLOAT3(-1.0f, +1.0f, -1.0f) },
+		{ XMFLOAT3(+1.0f, +1.0f, -1.0f) },
+		{ XMFLOAT3(+1.0f, -1.0f, -1.0f) },
+		{ XMFLOAT3(-1.0f, -1.0f, +1.0f) },
+		{ XMFLOAT3(-1.0f, +1.0f, +1.0f) },
+		{ XMFLOAT3(+1.0f, +1.0f, +1.0f) },
+		{ XMFLOAT3(+1.0f, -1.0f, +1.0f) },
+	};
+
+	ColorVertex colorVertices[uniqueVertexAmount] =
+	{
+		{ DirectX::XMFLOAT4A(1.0f, 1.0f, 1.0f, 1.0f) },
+		{ DirectX::XMFLOAT4A(0.0f, 1.0f, 1.0f, 1.0f) },
+		{ DirectX::XMFLOAT4A(1.0f, 0.0f, 1.0f, 1.0f) },
+		{ DirectX::XMFLOAT4A(1.0f, 1.0f, 0.0f, 1.0f) },
+		{ DirectX::XMFLOAT4A(0.0f, 0.0f, 1.0f, 1.0f) },
+		{ DirectX::XMFLOAT4A(1.0f, 0.0f, 0.0f, 1.0f) },
+		{ DirectX::XMFLOAT4A(0.0f, 1.0f, 0.0f, 1.0f) },
+		{ DirectX::XMFLOAT4A(0.0f, 0.0f, 0.0f, 1.0f) }
+	};
+
+	CombinedVertex comboVertices[uniqueVertexAmount]
 	{
 		{ XMFLOAT3(-1.0f, -1.0f, -1.0f), DirectX::XMFLOAT4A(1.0f, 1.0f, 1.0f, 1.0f) },
 		{ XMFLOAT3(-1.0f, +1.0f, -1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 1.0f, 1.0f) },
@@ -223,16 +350,43 @@ void BoxApp::BuildGeometryBuffers()
 		{ XMFLOAT3(+1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4A(0.0f, 0.0f, 0.0f, 1.0f) }
 	};
 
-	D3D11_BUFFER_DESC vbd;
-	vbd.Usage = D3D11_USAGE_IMMUTABLE;
-	vbd.ByteWidth = sizeof(Vertex) * 8;	// Size in bytes
-	vbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-	vbd.CPUAccessFlags = 0;
-	vbd.MiscFlags = 0;
-	vbd.StructureByteStride = 0;
-	D3D11_SUBRESOURCE_DATA vinitData;
-	vinitData.pSysMem = vertices;
-	HR(md3dDevice->CreateBuffer(&vbd, &vinitData, &mBoxVB));
+	D3D11_BUFFER_DESC positionVbd;
+	positionVbd.Usage = D3D11_USAGE_IMMUTABLE;
+	if (singleSlot)
+	{
+		positionVbd.ByteWidth = sizeof(CombinedVertex) * uniqueVertexAmount;	// Size in bytes
+	}
+	else
+	{
+		positionVbd.ByteWidth = sizeof(PositionVertex) * uniqueVertexAmount;	// Size in bytes
+	}
+	positionVbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	positionVbd.CPUAccessFlags = 0;
+	positionVbd.MiscFlags = 0;
+	positionVbd.StructureByteStride = 0;
+
+	D3D11_SUBRESOURCE_DATA vinitDataPosition;
+	if (singleSlot)
+	{
+		vinitDataPosition.pSysMem = comboVertices;
+	}
+	else
+	{
+		vinitDataPosition.pSysMem = positionVertices;
+	}
+	HR(md3dDevice->CreateBuffer(&positionVbd, &vinitDataPosition, &mBoxPositionVB));
+
+	D3D11_BUFFER_DESC ColorVbd;
+	ColorVbd.Usage = D3D11_USAGE_IMMUTABLE;
+	ColorVbd.ByteWidth = sizeof(ColorVertex) * uniqueVertexAmount;	// Size in bytes
+	ColorVbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	ColorVbd.CPUAccessFlags = 0;
+	ColorVbd.MiscFlags = 0;
+	ColorVbd.StructureByteStride = 0;
+	D3D11_SUBRESOURCE_DATA vinitDataColor;
+	vinitDataColor.pSysMem = colorVertices;
+	HR(md3dDevice->CreateBuffer(&ColorVbd, &vinitDataColor, &mBoxColorVB));
+
 
 	// Index buffer
 	UINT indices[] = {
@@ -263,7 +417,7 @@ void BoxApp::BuildGeometryBuffers()
 
 	D3D11_BUFFER_DESC ibd;
 	ibd.Usage = D3D11_USAGE_IMMUTABLE;
-	ibd.ByteWidth = sizeof(UINT) * 36;	// Size in bytes
+	ibd.ByteWidth = sizeof(UINT) * mIndexAmount;	// Size in bytes
 	ibd.BindFlags = D3D11_BIND_INDEX_BUFFER;
 	ibd.CPUAccessFlags = 0;
 	ibd.MiscFlags = 0;
@@ -271,6 +425,54 @@ void BoxApp::BuildGeometryBuffers()
 	D3D11_SUBRESOURCE_DATA iinitData;
 	iinitData.pSysMem = indices;
 	HR(md3dDevice->CreateBuffer(&ibd, &iinitData, &mBoxIB));
+
+	//
+	// PYRAMID 
+	// 
+	// Left hand 
+
+	const UINT pyramidVertexAmount = 5;
+	CombinedVertex pyramidVertices[pyramidVertexAmount] =
+	{
+		{ XMFLOAT3(-1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 0.2f, 1.0f) }, // 0 
+		{ XMFLOAT3(+1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 0.2f, 1.0f) }, // 1
+		{ XMFLOAT3(+1.0f, -1.0f, -1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 0.2f, 1.0f) }, // 2
+		{ XMFLOAT3(-1.0f, -1.0f, -1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 0.2f, 1.0f) }, // 3 
+		{ XMFLOAT3(+0.0f, +1.0f, +0.0f), DirectX::XMFLOAT4A(1.0f, 0.4f, 0.0f, 1.0f) }  // 4
+	};
+
+	D3D11_BUFFER_DESC pyramidVbd;
+	pyramidVbd.Usage = D3D11_USAGE_IMMUTABLE;
+	pyramidVbd.ByteWidth = sizeof(CombinedVertex) * pyramidVertexAmount;
+	pyramidVbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	pyramidVbd.CPUAccessFlags = 0;
+	pyramidVbd.MiscFlags = 0;
+	pyramidVbd.StructureByteStride = 0;
+	D3D11_SUBRESOURCE_DATA pyramidVertexInitDataPosition;
+	pyramidVertexInitDataPosition.pSysMem = pyramidVertices;
+	HR(md3dDevice->CreateBuffer(&pyramidVbd, &pyramidVertexInitDataPosition, &mPyramidVB));
+
+	UINT pyramidIndices[] =
+	{
+		0, 2, 1,
+		2, 0, 3,
+
+		4, 0, 1,
+		4, 1, 2,
+		4, 2, 3,
+		4, 3, 0
+	};
+
+	D3D11_BUFFER_DESC pIbd;
+	pIbd.Usage = D3D11_USAGE_IMMUTABLE;
+	pIbd.ByteWidth = sizeof(UINT) * mPyramidIndexAmount;	// Size in bytes
+	pIbd.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	pIbd.CPUAccessFlags = 0;
+	pIbd.MiscFlags = 0;
+	pIbd.StructureByteStride = 0;
+	D3D11_SUBRESOURCE_DATA piinitData;
+	piinitData.pSysMem = pyramidIndices;
+	HR(md3dDevice->CreateBuffer(&pIbd, &piinitData, &mPyramidIB));
 }
 
 void BoxApp::BuildFX()
@@ -303,10 +505,16 @@ void BoxApp::BuildFX()
 
 void BoxApp::BuildVertexLayout()
 {
+
+	UINT byteOffset = 0;
+	if (singleSlot)
+	{
+		byteOffset = sizeof(PositionVertex);
+	}
 	D3D11_INPUT_ELEMENT_DESC vertexDesc[] = 
 	{
-		{"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0}
-		, {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+		{"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, posSlot, 0, D3D11_INPUT_PER_VERTEX_DATA, 0}
+		, {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, colorSlot, byteOffset, D3D11_INPUT_PER_VERTEX_DATA, 0 }
 	};
 
 	D3DX11_PASS_DESC passDesc;
