@@ -62,6 +62,7 @@ private:
 	ID3DX11Effect* mFX;
 	ID3DX11EffectTechnique* mTech;
 	ID3DX11EffectMatrixVariable* mfxWorldViewProj;
+	ID3DX11EffectScalarVariable* mfxTime;
 
 	ID3D11InputLayout* mInputLayout;
 
@@ -189,8 +190,8 @@ void BoxApp::DrawScene()
 	md3dImmediateContext->IASetInputLayout(mInputLayout);
 	md3dImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	//DrawCube();
-	DrawPyramid();
+	DrawCube();
+	//DrawPyramid();
 
 	HR(mSwapChain->Present(0, 0));
 }
@@ -250,6 +251,7 @@ void BoxApp::UpdateConstantBuffer(XMFLOAT4X4 &worldMatrix)
 	XMMATRIX worldViewProj = world * view * proj;
 
 	mfxWorldViewProj->SetMatrix(reinterpret_cast<float*>(&worldViewProj));
+	mfxTime->SetFloat(mTimer.TotalTime());
 }
 
 void BoxApp::ApplyTechnique(ID3DX11EffectTechnique* technique, UINT indicesAmount)
@@ -501,6 +503,7 @@ void BoxApp::BuildFX()
 
 	mTech = mFX->GetTechniqueByName("ColorTech");
 	mfxWorldViewProj = mFX->GetVariableByName("gWorldViewProj")->AsMatrix();
+	mfxTime = mFX->GetVariableByName("gTime")->AsScalar();
 }
 
 void BoxApp::BuildVertexLayout()
