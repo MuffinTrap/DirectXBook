@@ -168,14 +168,27 @@ void BoxApp::OnResize()
 
 void BoxApp::UpdateScene(float dt)
 {
+	mTheta += 0.2f * dt;
+	mPhi += 0.2f * dt;
+
 	// Convert sphere coordinates to Cartesian
-	float x = mRadius * sinf(mPhi) * cosf(mTheta);
-	float y = mRadius * sinf(mPhi) * sinf(mTheta);
-	float z = mRadius * cosf(mPhi);
+	// float x = mRadius * sinf(mPhi) * cosf(mTheta);
+	// float y = mRadius * sinf(mPhi) * sinf(mTheta);
+	// float z = mRadius * cosf(mPhi);
+
+	// Camera position
+	float x = 0.0f;// mRadius * sinf(mTheta);
+	float y = 1.0f;
+	float z = mRadius;
+
+	// Rotate object
+	XMMATRIX rotated = XMMatrixRotationRollPitchYaw(sinf(mPhi), cosf(mTheta), cosf(mPhi) + sinf(mTheta));
+	XMStoreFloat4x4(&mPyramidWorld, rotated);
+
 
 	// View matrix points to origo
 	XMVECTOR pos = XMVectorSet(x, y, z, 1.0f);
-	XMVECTOR target = XMVectorZero();
+	XMVECTOR target = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 	XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
 	XMMATRIX V = XMMatrixLookAtLH(pos, target, up);
@@ -190,8 +203,8 @@ void BoxApp::DrawScene()
 	md3dImmediateContext->IASetInputLayout(mInputLayout);
 	md3dImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	DrawCube();
-	//DrawPyramid();
+	//DrawCube();
+	DrawPyramid();
 
 	HR(mSwapChain->Present(0, 0));
 }
@@ -436,11 +449,11 @@ void BoxApp::BuildGeometryBuffers()
 	const UINT pyramidVertexAmount = 5;
 	CombinedVertex pyramidVertices[pyramidVertexAmount] =
 	{
-		{ XMFLOAT3(-1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 0.2f, 1.0f) }, // 0 
-		{ XMFLOAT3(+1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 0.2f, 1.0f) }, // 1
-		{ XMFLOAT3(+1.0f, -1.0f, -1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 0.2f, 1.0f) }, // 2
-		{ XMFLOAT3(-1.0f, -1.0f, -1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 0.2f, 1.0f) }, // 3 
-		{ XMFLOAT3(+0.0f, +1.0f, +0.0f), DirectX::XMFLOAT4A(1.0f, 0.4f, 0.0f, 1.0f) }  // 4
+		{ XMFLOAT3(-1.0f, 0.0f, +1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 0.2f, 1.0f) }, // 0 
+		{ XMFLOAT3(+1.0f, 0.0f, +1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 0.2f, 1.0f) }, // 1
+		{ XMFLOAT3(+1.0f, 0.0f, -1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 0.2f, 1.0f) }, // 2
+		{ XMFLOAT3(-1.0f, 0.0f, -1.0f), DirectX::XMFLOAT4A(0.0f, 1.0f, 0.2f, 1.0f) }, // 3 
+		{ XMFLOAT3(+0.0f, +2.0f, +0.0f), DirectX::XMFLOAT4A(1.0f, 0.4f, 0.0f, 1.0f) }  // 4
 	};
 
 	D3D11_BUFFER_DESC pyramidVbd;
@@ -475,6 +488,8 @@ void BoxApp::BuildGeometryBuffers()
 	D3D11_SUBRESOURCE_DATA piinitData;
 	piinitData.pSysMem = pyramidIndices;
 	HR(md3dDevice->CreateBuffer(&pIbd, &piinitData, &mPyramidIB));
+
+	
 }
 
 void BoxApp::BuildFX()
